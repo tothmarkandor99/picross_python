@@ -1,0 +1,1 @@
+./pbnsolve solve.mk | tail -n +2 > solution.txt
