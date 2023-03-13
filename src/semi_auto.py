@@ -2,7 +2,13 @@ import cv2
 import numpy as np
 import pytesseract as tess
 from subprocess import call
+import pathlib
+import os
 #tess.pytesseract.tesseract_cmd = r'c:\Program Files\Tesseract-OCR\tesseract.exe'
+
+current_directory = str(pathlib.Path(__file__).parent.resolve()) + "/"
+
+print(current_directory)
 
 # Image area constants
 LEFT30 = np.s_[510:1353,0:223]
@@ -117,13 +123,14 @@ def split_cols(I, fullcolor):
 def touch_30(left, top):
   x = TOPLEFT_X_30 + int(left * (BOTTOMRIGHT_X_30 - TOPLEFT_X_30) / 29.0)
   y = TOPLEFT_Y_30 + int(top * (BOTTOMRIGHT_Y_30 - TOPLEFT_Y_30) / 29.0)
-  call(["adb", "shell", "input", "tap" , str(x) , str(y)])
+  call([current_directory + "../lib/adb/adb", "shell", "input", "tap" , str(x) , str(y)])
 
 # Load image from device screen
-call(["adb", "devices"])
-call(["adb", "shell", "screencap", "-p" , "/sdcard/screen.png"])
-call(["adb", "pull", "/sdcard/screen.png"])
-IMAGE = cv2.imread('screen.png')
+call([current_directory + "../lib/adb/adb.exe", "devices"])
+call([current_directory + "../lib/adb/adb", "shell", "screencap", "-p" , "/sdcard/screen.png"])
+call([current_directory + "../lib/adb/adb", "pull", "/sdcard/screen.png"])
+os.replace(str(pathlib.Path().resolve()) + "/screen.png", current_directory + "../temp/screen.png")
+IMAGE = cv2.imread(current_directory + '../temp/screen.png')
 
 # Prepare image area arrays
 LEFT = IMAGE[LEFT30]
@@ -135,7 +142,7 @@ TOP_MONO = TOP[:,:,1]
 TOP_MONO = cv2.threshold(TOP_MONO, 180, 255, cv2.THRESH_BINARY)[1]
 
 # Open .mk file
-FILE = open("solve.mk", "w")
+FILE = open(current_directory + "../temp/solve.mk", "w")
 FILE.write("30 30\n")
 
 # Process left area (rows)
