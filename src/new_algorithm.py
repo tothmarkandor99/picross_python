@@ -8,8 +8,6 @@ import time
 
 current_directory = str(pathlib.Path(__file__).parent.resolve()) + "/"
 
-print(current_directory)
-
 # Image area constants
 LEFT30 = np.s_[510:1353,0:223]
 TOP30 = np.s_[180:502,220:1077]
@@ -180,10 +178,10 @@ def touch_30(left, top):
   call([current_directory + "../lib/adb/adb", "shell", "input", "tap" , str(x) , str(y)])
 
 # Load image from device screen
-# call([current_directory + "../lib/adb/adb.exe", "devices"])
-# call([current_directory + "../lib/adb/adb", "shell", "screencap", "-p" , "/sdcard/screen.png"])
-# call([current_directory + "../lib/adb/adb", "pull", "/sdcard/screen.png"])
-# os.replace(str(pathlib.Path().resolve()) + "/screen.png", current_directory + "../temp/screen.png")
+call([current_directory + "../lib/adb/adb.exe", "devices"])
+call([current_directory + "../lib/adb/adb", "shell", "screencap", "-p" , "/sdcard/screen.png"])
+call([current_directory + "../lib/adb/adb", "pull", "/sdcard/screen.png"])
+os.replace(str(pathlib.Path().resolve()) + "/screen.png", current_directory + "../temp/screen.png")
 IMAGE = cv2.imread(current_directory + '../temp/screen.png')
 
 # Prepare image area arrays
