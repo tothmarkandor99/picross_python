@@ -4,7 +4,8 @@ import pytesseract as tess
 from subprocess import call
 import pathlib
 import os
-import time
+from time import sleep
+from TouchHandler import TouchHandler
 
 current_directory = str(pathlib.Path(__file__).parent.resolve()) + "/"
 
@@ -148,7 +149,6 @@ def split_rows(I, fullcolor):
     cv2.waitKey(1)
 
     rows.append(row_to_text(row, row_fullcolor))
-  cv2.destroyAllWindows()
 
 def split_cols(I, fullcolor):
   cols = []
@@ -170,12 +170,11 @@ def split_cols(I, fullcolor):
     col_fullcolor[:,:,:] = fullcolor[:,left - 5:right + 5,:]
     
     cols.append(col_to_text(col, col_fullcolor))
-  cv2.destroyAllWindows()
 
-def touch_30(left, top):
+def cell_to_coordinates_30(left, top):
   x = TOPLEFT_X_30 + int(left * (BOTTOMRIGHT_X_30 - TOPLEFT_X_30) / 29.0)
   y = TOPLEFT_Y_30 + int(top * (BOTTOMRIGHT_Y_30 - TOPLEFT_Y_30) / 29.0)
-  call([current_directory + "../lib/adb/adb", "shell", "input", "tap" , str(x) , str(y)])
+  return x, y
 
 # Load image from device screen
 call([current_directory + "../lib/adb/adb.exe", "devices"])
@@ -248,13 +247,16 @@ for y, line in enumerate(FILE_SOL):
 FILE_SOL.close()
 
 # Touch black cells on device
-for y, row in enumerate(solution):
-  for x, is_checked in enumerate(row):
-    if is_checked:
-      touch_30(x, y)
-      print("X", end="", flush=True)
-    else:
-      print(".", end="", flush=True)
-  print("")
+with TouchHandler() as touch_handler:
+  for y, row in enumerate(solution):
+    for x, is_checked in enumerate(row):
+      if is_checked:
+        x_coord, y_coord = cell_to_coordinates_30(x, y)
+        touch_handler.add_touch(x_coord, y_coord)
+        sleep(0.05)
+        print("X", end="", flush=True)
+      else:
+        print(".", end="", flush=True)
+    print("")
 
 print("Puzzle solved")
