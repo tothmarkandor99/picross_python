@@ -2,12 +2,13 @@ import cv2
 import numpy as np
 import pytesseract as tess
 from subprocess import call
-import pathlib
-import os
+import subprocess
+from pathlib import Path
 from time import sleep
 from TouchHandler import TouchHandler
+from math import sqrt
 
-current_directory = str(pathlib.Path(__file__).parent.resolve()) + "/"
+current_directory = Path(__file__).parent
 
 # Image area constants
 LEFT30 = np.s_[510:1353, 0:223]
@@ -16,6 +17,7 @@ TOPLEFT_X_30 = 240
 TOPLEFT_Y_30 = 524
 BOTTOMRIGHT_X_30 = 1055
 BOTTOMRIGHT_Y_30 = 1337
+NUMBER_ROW_HEIGHT_30 = 25.375
 YELLOW = np.array([0, 207, 221])  # BGR order
 WHITE = np.array([255, 255, 255])  # BGR order
 
@@ -24,6 +26,60 @@ WHITE = np.array([255, 255, 255])  # BGR order
 
 def is_color(pixel, color, threshold=1000.0):
     return ((color - pixel) ** 2).mean() < threshold
+
+
+def detect_board_size(IMAGE):
+    GRAY = cv2.cvtColor(IMAGE, cv2.COLOR_BGR2GRAY)
+    MONO = cv2.threshold(GRAY, 180, 255, cv2.THRESH_BINARY)[1]
+    contours, _ = cv2.findContours(MONO, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+
+    # filter axis-aligned rectangles
+    contours = [contour for contour in contours if len(contour) == 4]
+    contours_data = [
+        {"area": cv2.contourArea(contour), "contour": contour} for contour in contours
+    ]
+    contours_data.sort(key=lambda x: x["area"], reverse=True)
+
+    # find contours with similar area
+    area_prev = contours_data[0]["area"]
+    count = 0
+    max_count = 0
+    max_count_interval = [0, 0]
+    can_stop = False
+    for i, contour in enumerate(contours_data):
+        area = contour["area"]
+        delta = abs(area - area_prev)
+        if delta < 50:
+            count += 1
+            if count >= 100:
+                can_stop = True
+            if count > max_count:
+                max_count = count
+                max_count_interval = [i - count, i]
+        else:
+            if can_stop:
+                break
+            count = 0
+        area_prev = area
+    cell_contours_data = contours_data[
+        max_count_interval[0] : max_count_interval[1] + 1
+    ]
+    cell_contours = [c["contour"] for c in cell_contours_data]
+
+    # calculate board size
+    cells = len(cell_contours)
+    side = int(sqrt(cells))
+    if side * side != cells:
+        raise Exception("Warning: not square board")
+
+    # calculate board area
+    hull = cv2.convexHull(np.concatenate(cell_contours))
+    top_left_x = hull[hull[:, :, 0].argmin()][0][0]
+    top_left_y = hull[hull[:, :, 1].argmin()][0][1]
+    bottom_right_x = hull[hull[:, :, 0].argmax()][0][0]
+    bottom_right_y = hull[hull[:, :, 1].argmax()][0][1]
+
+    return side, [top_left_x, top_left_y, bottom_right_x, bottom_right_y]
 
 
 def digits_to_numbers(input_text, colors, fullcolor):
@@ -94,7 +150,6 @@ def row_to_text(I, fullcolor):
 
 
 def col_to_colors(col):
-    NUMBER_ROW_HEIGHT_30 = 25.375
 
     colors = []
 
@@ -104,6 +159,8 @@ def col_to_colors(col):
         pixel_row_index = int(
             NUMBER_ROW_HEIGHT_30 * 0.6 + len(colors) * NUMBER_ROW_HEIGHT_30
         )
+        if pixel_row_index >= col.shape[0]:
+            break
         single_pixel_row = col[-pixel_row_index, :, :]
 
         for pixel in single_pixel_row:
@@ -129,6 +186,28 @@ def col_to_colors(col):
 
 
 def col_to_text(I, fullcolor):
+    threshold = cv2.threshold(
+        cv2.cvtColor(I, cv2.COLOR_BGR2GRAY), 180, 255, cv2.THRESH_BINARY
+    )[1]
+    contours, _ = cv2.findContours(threshold, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+    contours = [contour for contour in contours if len(contour) != 4]
+    content_area = cv2.boundingRect(np.concatenate(contours))
+    I = I[
+        max(0, content_area[1] - 1) : min(
+            I.shape[0], content_area[1] + content_area[3] + 1
+        ),
+        max(0, content_area[0] - 1) : min(
+            I.shape[1], content_area[0] + content_area[2] + 1
+        ),
+    ]
+    fullcolor = fullcolor[
+        max(0, content_area[1] - 1) : min(
+            fullcolor.shape[0], content_area[1] + content_area[3] + 1
+        ),
+        max(0, content_area[0] - 1) : min(
+            fullcolor.shape[1], content_area[0] + content_area[2] + 1
+        ),
+    ]
     colors = col_to_colors(fullcolor)
 
     input_text = list(tess.image_to_string(I, config="--psm 6").replace("\n", ""))
@@ -186,67 +265,78 @@ def split_cols(I, fullcolor):
 
 
 def cell_to_coordinates_30(left, top):
-    x = TOPLEFT_X_30 + int(left * (BOTTOMRIGHT_X_30 - TOPLEFT_X_30) / 29.0)
-    y = TOPLEFT_Y_30 + int(top * (BOTTOMRIGHT_Y_30 - TOPLEFT_Y_30) / 29.0)
+    cellsize = (BOTTOMRIGHT_X_30 - TOPLEFT_X_30) / 30.0
+    x = int(TOPLEFT_X_30 + cellsize / 2.0 + left * cellsize)
+    y = int(TOPLEFT_Y_30 + cellsize / 2.0 + top * cellsize)
     return x, y
 
 
 # Load image from device screen
-call([current_directory + "../lib/adb/adb.exe", "devices"])
+adb_path = current_directory.parent / "lib/adb/adb.exe"
+call([adb_path, "devices"])
 call(
     [
-        current_directory + "../lib/adb/adb",
+        adb_path,
         "shell",
         "screencap",
         "-p",
         "/sdcard/screen.png",
     ]
 )
-call([current_directory + "../lib/adb/adb", "pull", "/sdcard/screen.png"])
-os.replace(
-    str(pathlib.Path().resolve()) + "/screen.png",
-    current_directory + "../temp/screen.png",
+temp_path = current_directory.parent / "temp"
+temp_path.mkdir(exist_ok=True)
+call([adb_path, "pull", "/sdcard/screen.png"], cwd=temp_path)
+screenshot_path = temp_path / "screen.png"
+IMAGE = cv2.imread(str(screenshot_path))
+
+# Detect board size
+side, [TOPLEFT_X_30, TOPLEFT_Y_30, BOTTOMRIGHT_X_30, BOTTOMRIGHT_Y_30] = (
+    detect_board_size(IMAGE)
 )
-IMAGE = cv2.imread(current_directory + "../temp/screen.png")
+LEFT30 = np.s_[TOPLEFT_Y_30:0, BOTTOMRIGHT_Y_30:TOPLEFT_X_30]
+TOP30 = np.s_[TOPLEFT_X_30:1000, BOTTOMRIGHT_X_30:TOPLEFT_Y_30]
+
+pass
 
 # Prepare image area arrays
-LEFT = IMAGE[LEFT30]
+LEFT = IMAGE[TOPLEFT_Y_30:BOTTOMRIGHT_Y_30, 0:TOPLEFT_X_30]
 LEFT_MONO = LEFT[:, :, 1]
 LEFT_MONO = cv2.threshold(LEFT_MONO, 180, 255, cv2.THRESH_BINARY)[1]
 
-TOP = IMAGE[TOP30]
+TOP = IMAGE[230:TOPLEFT_Y_30, TOPLEFT_X_30:BOTTOMRIGHT_X_30]
+cv2.imwrite(str(temp_path / "debug.png"), TOP)
 TOP_MONO = TOP[:, :, 1]
 TOP_MONO = cv2.threshold(TOP_MONO, 180, 255, cv2.THRESH_BINARY)[1]
 
 # Open .mk file
-FILE = open(current_directory + "../temp/solve.mk", "w")
-FILE.write("30 30\n")
+problem_path = temp_path / "solve.nin"
+with open(problem_path, "w") as f:
+    f.write("30 30\n")
 
-# Process left area (rows)
-rows = split_rows(LEFT_MONO, LEFT)
-rowsum = 0
-for row in rows:
-    for num in row:
-        rowsum += num
+    # Process left area (rows)
+    rows = split_rows(LEFT_MONO, LEFT)
+    rowsum = 0
+    for row in rows:
+        for num in row:
+            rowsum += num
 
-# Prepare top area (cols)
-cols = split_cols(TOP_MONO, TOP)
-colsum = 0
-for col in cols:
-    for num in col:
-        colsum += num
+    # Prepare top area (cols)
+    cols = split_cols(TOP_MONO, TOP)
+    colsum = 0
+    for col in cols:
+        for num in col:
+            colsum += num
 
-# Write to file and wait for solution
-for row in rows:
-    for num in row:
-        FILE.write(str(num) + " ")
-    FILE.write("\n")
-FILE.write("#\n")
-for col in cols:
-    for num in col:
-        FILE.write(str(num) + " ")
-    FILE.write("\n")
-FILE.close()
+    # Write to file and wait for solution
+    for row in rows:
+        for num in row:
+            f.write(str(num) + " ")
+        f.write("\n")
+    f.write("#\n")
+    for col in cols:
+        for num in col:
+            f.write(str(num) + " ")
+        f.write("\n")
 
 if len(rows) != 30 or len(cols) != 30 or rowsum != colsum:
     if len(rows) != 30:
@@ -261,16 +351,16 @@ if len(rows) != 30 or len(cols) != 30 or rowsum != colsum:
 call(["bash", "solve.sh"])
 
 # Read solution
-FILE_SOL = open(current_directory + "../temp/solution.txt", "r")
-solution = []
-for y, line in enumerate(FILE_SOL):
-    solution.append([])
-    for x, char in enumerate(line):
-        if char == "X":
-            solution[len(solution) - 1].append(True)
-        else:
-            solution[len(solution) - 1].append(False)
-FILE_SOL.close()
+solution_path = temp_path / "solution.txt"
+with open(solution_path, "r") as f:
+    solution = []
+    for y, line in enumerate(f):
+        solution.append([])
+        for x, char in enumerate(line):
+            if char == "#":
+                solution[len(solution) - 1].append(True)
+            else:
+                solution[len(solution) - 1].append(False)
 
 # Touch black cells on device
 with TouchHandler() as touch_handler:
@@ -279,8 +369,8 @@ with TouchHandler() as touch_handler:
             if is_checked:
                 x_coord, y_coord = cell_to_coordinates_30(x, y)
                 touch_handler.add_touch(x_coord, y_coord)
-                sleep(0.05)
-                print("X", end="", flush=True)
+                sleep(0.15)
+                print("#", end="", flush=True)
             else:
                 print(".", end="", flush=True)
         print("")
