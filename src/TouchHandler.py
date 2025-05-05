@@ -20,26 +20,18 @@ class TouchHandler:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.bind((self.host, self.port))
             s.listen()
-            video_conn, _ = s.accept()
             control_conn, _ = s.accept()
-            with video_conn:
-                with control_conn:
-                    video_conn.setblocking(False)
-                    while self.worker_running:
-                        # while True:
-                        #   a = video_conn.recv(4096)
-                        #   if (len(a) < 4096):
-                        #     break
+            with control_conn:
+                while self.worker_running:
+                    try:
+                        (x, y) = self.touch_queue.get(True, 0.5)
+                        control_conn.send(self.__encode_touch_action_down(x, y))
+                        control_conn.send(self.__encode_touch_action_up(x, y))
+                        self.touch_queue.task_done()
+                    except queue.Empty:
+                        pass
 
-                        try:
-                            (x, y) = self.touch_queue.get(True, 0.5)
-                            control_conn.send(self.__encode_touch_action_down(x, y))
-                            control_conn.send(self.__encode_touch_action_up(x, y))
-                            self.touch_queue.task_done()
-                        except queue.Empty:
-                            pass
-
-    def __init__(self, width=1080, height=2160, host="127.0.0.1", port=27183):
+    def __init__(self, width=1080, height=2400, host="127.0.0.1", port=27183):
         self.current_directory = str(pathlib.Path(__file__).parent.resolve()) + "/"
 
         self.width = width
@@ -50,12 +42,14 @@ class TouchHandler:
         self.touch_queue = queue.Queue()
 
     def __enter__(self):
-        subprocess.call([self.current_directory + "../lib/adb/adb.exe", "devices"])
+        subprocess.check_call(
+            [self.current_directory + "../lib/adb/adb.exe", "devices"]
+        )
 
-        subprocess.Popen(
+        subprocess.check_call(
             [self.current_directory + "../lib/adb/adb.exe", "reverse", "--remove-all"]
         )
-        subprocess.Popen(
+        subprocess.check_call(
             [
                 self.current_directory + "../lib/adb/adb.exe",
                 "reverse",
@@ -64,7 +58,7 @@ class TouchHandler:
             ]
         )
 
-        subprocess.call(
+        subprocess.check_call(
             [
                 self.current_directory + "../lib/adb/adb.exe",
                 "shell",
@@ -73,7 +67,7 @@ class TouchHandler:
                 "/data/local/tmp/scrcpy-server.jar",
             ]
         )
-        subprocess.call(
+        subprocess.check_call(
             [
                 self.current_directory + "../lib/adb/adb.exe",
                 "push",
@@ -90,22 +84,16 @@ class TouchHandler:
                 "app_process",
                 "/",
                 "com.genymobile.scrcpy.Server",
-                "1.25",
+                "3.2",
                 "log_level=verbose",
-                "max_size=0",
-                "bit_rate=1",
-                "max_fps=0",
-                "lock_video_orientation=-1",
-                "tunnel_forward=false",
-                "send_frame_meta=false",
+                "video=false",
+                "audio=false",
                 "control=true",
-                "display_id=0",
-                "show_touches=false",
-                "stay_awake=false",
+                "stay_awake=true",
                 "power_off_on_close=false",
                 "clipboard_autosync=false",
             ],
-            stdout=subprocess.DEVNULL,
+            # stdout=subprocess.DEVNULL,
         )
 
         self.worker_running = True
@@ -150,6 +138,9 @@ class TouchHandler:
         control_message += bytearray(
             (0x00, 0x00, 0x00, 0x01)
         )  # AMOTION_EVENT_BUTTON_PRIMARY (action button)
+        control_message += bytearray(
+            (0x00, 0x00, 0x00, 0x01)
+        )  # AMOTION_EVENT_BUTTON_PRIMARY (buttons)
         return control_message
 
     def __encode_touch_action_up(self, x, y):
@@ -164,5 +155,8 @@ class TouchHandler:
         control_message += bytearray(self.width.to_bytes(2, byteorder="big"))  # width
         control_message += bytearray(self.height.to_bytes(2, byteorder="big"))  # height
         control_message += bytearray((0x00, 0x00))  # pressure
+        control_message += bytearray(
+            (0x00, 0x00, 0x00, 0x01)
+        )  # AMOTION_EVENT_BUTTON_PRIMARY
         control_message += bytearray((0x00, 0x00, 0x00, 0x00))  # none
         return control_message
