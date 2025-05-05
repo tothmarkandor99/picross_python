@@ -348,19 +348,27 @@ if len(rows) != 30 or len(cols) != 30 or rowsum != colsum:
         print("Column sum is " + str(colsum))
     print("Waiting for manual fix...")
     input()
-call(["bash", "solve.sh"])
+
+# Run solver
+solver_path = lib_path / "picross-solver" / "bin" / "picross_solver_cli.exe"
+solver_output = subprocess.check_output([solver_path, problem_path]).decode("utf-8")
 
 # Read solution
-solution_path = temp_path / "solution.txt"
-with open(solution_path, "r") as f:
-    solution = []
-    for y, line in enumerate(f):
-        solution.append([])
-        for x, char in enumerate(line):
-            if char == "#":
-                solution[len(solution) - 1].append(True)
-            else:
-                solution[len(solution) - 1].append(False)
+solution_text = []
+lines = solver_output.splitlines()
+for i, line in enumerate(lines):
+    if "Solution nb 1" in line:
+        solution_text = lines[i + 1 : i + 1 + side]
+        break
+
+solution = []
+for y, line in enumerate(solution_text):
+    solution.append([])
+    for x, char in enumerate(line):
+        if char == "#":
+            solution[len(solution) - 1].append(True)
+        else:
+            solution[len(solution) - 1].append(False)
 
 # Touch black cells on device
 with TouchHandler() as touch_handler:

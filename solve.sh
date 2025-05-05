@@ -1,1 +1,0 @@
-./lib/pbnsolve/pbnsolve ./temp/solve.mk | tail -n +2 > ./temp/solution.txt
