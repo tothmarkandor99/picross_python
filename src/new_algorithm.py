@@ -1,22 +1,19 @@
 import cv2
 import numpy as np
 import pytesseract as tess
-from subprocess import call
 import subprocess
 from pathlib import Path
 from time import sleep
 from TouchHandler import TouchHandler
 from math import sqrt
+from sklearn.cluster import KMeans
 
 current_directory = Path(__file__).parent
+temp_path = current_directory.parent / "temp"
+temp_path.mkdir(exist_ok=True)
+lib_path = current_directory.parent / "lib"
 
 # Image area constants
-LEFT30 = np.s_[510:1353, 0:223]
-TOP30 = np.s_[180:502, 220:1077]
-TOPLEFT_X_30 = 240
-TOPLEFT_Y_30 = 524
-BOTTOMRIGHT_X_30 = 1055
-BOTTOMRIGHT_Y_30 = 1337
 NUMBER_ROW_HEIGHT_30 = 25.375
 YELLOW = np.array([0, 207, 221])  # BGR order
 WHITE = np.array([255, 255, 255])  # BGR order
@@ -36,34 +33,29 @@ def detect_board_size(IMAGE):
     # filter axis-aligned rectangles
     contours = [contour for contour in contours if len(contour) == 4]
     contours_data = [
-        {"area": cv2.contourArea(contour), "contour": contour} for contour in contours
+        {
+            "area": cv2.contourArea(contour),
+            "contour": contour,
+            "is_small_cluster": False,
+        }
+        for contour in contours
     ]
-    contours_data.sort(key=lambda x: x["area"], reverse=True)
+    contours_data = [c for c in contours_data if c["area"] != 0.0]
 
-    # find contours with similar area
-    area_prev = contours_data[0]["area"]
-    count = 0
-    max_count = 0
-    max_count_interval = [0, 0]
-    can_stop = False
-    for i, contour in enumerate(contours_data):
-        area = contour["area"]
-        delta = abs(area - area_prev)
-        if delta < 50:
-            count += 1
-            if count >= 100:
-                can_stop = True
-            if count > max_count:
-                max_count = count
-                max_count_interval = [i - count, i]
-        else:
-            if can_stop:
-                break
-            count = 0
-        area_prev = area
-    cell_contours_data = contours_data[
-        max_count_interval[0] : max_count_interval[1] + 1
-    ]
+    # cluster contours by area
+    areas = np.array([c["area"] for c in contours_data])
+    km = KMeans(n_clusters=2)
+    km.fit(areas.reshape(-1, 1))
+
+    # remove small clusters
+    cluster_sizes = np.bincount(km.labels_)
+    for i, size in enumerate(cluster_sizes):
+        if size < 15:
+            for j, label in enumerate(km.labels_):
+                if label == i:
+                    contours_data[j]["is_small_cluster"] = True
+
+    cell_contours_data = [c for c in contours_data if not c["is_small_cluster"]]
     cell_contours = [c["contour"] for c in cell_contours_data]
 
     # calculate board size
@@ -273,8 +265,8 @@ def cell_to_coordinates_30(left, top):
 
 # Load image from device screen
 adb_path = current_directory.parent / "lib/adb/adb.exe"
-call([adb_path, "devices"])
-call(
+subprocess.run([adb_path, "devices"])
+subprocess.run(
     [
         adb_path,
         "shell",
@@ -283,9 +275,7 @@ call(
         "/sdcard/screen.png",
     ]
 )
-temp_path = current_directory.parent / "temp"
-temp_path.mkdir(exist_ok=True)
-call([adb_path, "pull", "/sdcard/screen.png"], cwd=temp_path)
+subprocess.run([adb_path, "pull", "/sdcard/screen.png"], cwd=temp_path)
 screenshot_path = temp_path / "screen.png"
 IMAGE = cv2.imread(str(screenshot_path))
 
