@@ -263,13 +263,19 @@ def split_cols(fullcolor, side: int) -> list[list[int]]:
         digit = np.zeros((h + padding * 2, w + padding * 2), np.uint8)
         cv2.drawContours(digit, [digit_contour], -1, (255, 255, 255), -1)
 
-        # draw child contours with black
+        # subtract children contours (holes)
         next_child_index = hierarchy[0][i][2]
         while next_child_index != -1:
+            hole = np.zeros((h + padding * 2, w + padding * 2), np.uint8)
             child_contour = contours[next_child_index] - np.array(
                 [[x - padding, y - padding]]
             )
-            cv2.drawContours(digit, [child_contour], -1, (0, 0, 0), -1)
+            cv2.drawContours(hole, [child_contour], -1, (255, 255, 255), -1)
+
+            # erode hole to avoid removing too much from the digit
+            hole = cv2.erode(hole, np.ones((2, 2), np.uint8), iterations=1)
+            digit = cv2.bitwise_and(digit, cv2.bitwise_not(hole))
+
             next_child_index = hierarchy[0][next_child_index][0]
 
         # recognize
