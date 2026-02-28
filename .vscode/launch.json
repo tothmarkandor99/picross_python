@@ -8,7 +8,7 @@
       "name": "Debug program",
       "type": "debugpy",
       "request": "launch",
-      "program": "./src/new_algorithm.py",
+      "program": "./src/program.py",
       "console": "integratedTerminal"
     }
   ]
